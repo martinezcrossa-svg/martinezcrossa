@@ -2629,16 +2629,29 @@ if(infHastaEl)infHastaEl.addEventListener("change",function(){renderInformes();}
 // Expose reload function globally so Supabase script can call it after loading data
 window._reloadAppData = function() {
   loadLS();
+  // Sync ventaNum to global after loadLS re-derives it
+  window._getVentaNum = function(){ return ventaNum; };
   refreshCatSelects();
   refreshProvSelect();
   renderStats();
-  renderTable();
   updateCobrosBadge();
   updateWebLabel();
-  renderDashboard();
-  if(document.getElementById("pg-bd-clientes").classList.contains("on"))renderClientes();
-  if(document.getElementById("pg-bd-proveedores").classList.contains("on"))renderProveedores();
-  if(document.getElementById("pg-tesoreria").classList.contains("on"))renderTesoreria();
+  // Re-render whatever page is currently visible
+  var pages = ["dashboard","ventas","otros-ingresos","compras","costos","bd-productos","bd-clientes","bd-proveedores","informes","tesoreria","config","cc-clientes","cc-proveedores"];
+  pages.forEach(function(pid) {
+    var pg = document.getElementById("pg-"+pid);
+    if (pg && pg.classList.contains("on")) {
+      if(pid==="dashboard")renderDashboard();
+      else if(pid==="bd-productos"){renderTable();}
+      else if(pid==="bd-clientes")renderClientes();
+      else if(pid==="bd-proveedores")renderProveedores();
+      else if(pid==="tesoreria")renderTesoreria();
+      else if(pid==="ventas")renderVentasHistorial();
+      else if(pid==="cc-clientes")renderCCClientes();
+      else if(pid==="cc-proveedores")renderCCProveedores();
+    }
+  });
+  renderDashboard(); // always refresh dashboard
 };
 
 })();
@@ -2662,7 +2675,7 @@ localStorage.setItem = function(key, value) {
   _origSetItem(key, value);
   if (DB_KEYS.includes(key) && currentUser && !_dbLoadingFlag) {
     if (_syncTimer) clearTimeout(_syncTimer);
-    _syncTimer = setTimeout(() => saveAllToDB(), 1500);
+    _syncTimer = setTimeout(() => saveAllToDB(), 500);
   }
 };
 
@@ -2709,8 +2722,8 @@ function showSyncStatus(type, msg) {
   if (!el || !currentUser) return;
   const user = currentUser.email.split('@')[0];
   if (type === 'ok') {
-    el.innerHTML = '<span style="color:#6EE7B7">' + user + ' &#x2713;</span>';
-    setTimeout(() => { el.textContent = user; el.style.color = 'rgba(255,255,255,.5)'; }, 2500);
+    el.innerHTML = '<span style="color:#6EE7B7;font-size:12px">' + user + ' &#x2713;</span> <span id="realtime-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#34D399;vertical-align:middle;margin-left:2px"></span>';
+    setTimeout(() => updateNavUser(), 2500);
   } else {
     el.innerHTML = '<span style="color:#FCA5A5" title="' + (msg||'') + '">&#x26A0; Error sync</span>';
     console.error('Sync error:', msg);
@@ -2728,17 +2741,25 @@ async function testConnection() {
 function updateNavUser() {
   const el = document.getElementById('nav-saved');
   if (el && currentUser) {
-    el.textContent = currentUser.email.split('@')[0];
-    el.style.color = 'rgba(255,255,255,.5)';
-    el.style.fontSize = '12px';
+    const user = currentUser.email.split('@')[0];
+    el.innerHTML = '<span style="color:rgba(255,255,255,.5);font-size:12px">' + user + '</span> <span id="realtime-dot" title="Tiempo real" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#6B7280;vertical-align:middle;margin-left:2px"></span>';
   }
 }
 
 async function startWithData() {
-  // Load fresh data from Supabase, then reload app state
   const loaded = await loadFromDB();
-  if (loaded && window._reloadAppData) window._reloadAppData();
+  if (loaded && window._reloadAppData) {
+    window._reloadAppData();
+  }
   updateNavUser();
+  // Start realtime sync
+  setupRealtime();
+  // Show confirmation with data counts
+  const salesData = (() => { try { return JSON.parse(localStorage.getItem('mc_s')||'[]'); } catch(e){return [];} })();
+  const salesCount = salesData.length;
+  const prodsCount = (() => { try { return JSON.parse(localStorage.getItem('mc_p')||'[]').length; } catch(e){return 0;} })();
+  console.log('[MC] Sync complete. Ventas:', salesCount, 'Productos:', prodsCount, 'DB loaded:', loaded);
+  if (typeof toast === 'function') toast(loaded ? ('Sincronizado: ' + salesCount + ' ventas') : 'Sin conexion - datos locales');
 }
 
 // ── AUTH ──
@@ -2808,6 +2829,47 @@ async function doLogout() {
 document.getElementById('btn-login').addEventListener('click', doLogin);
 document.getElementById('login-pass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 document.getElementById('btn-logout').addEventListener('click', doLogout);
+
+// Realtime: auto-reload when another device saves data
+let realtimeChannel = null;
+function setupRealtime() {
+  if (realtimeChannel) realtimeChannel.unsubscribe();
+  realtimeChannel = supa
+    .channel('store_changes')
+    .on('postgres_changes', 
+      { event: '*', schema: 'public', table: 'store_data' },
+      async (payload) => {
+        console.log('[MC] Realtime update received:', payload.new?.key);
+        // Update localStorage with the new value
+        if (payload.new && payload.new.key && payload.new.value) {
+          _dbLoadingFlag = true;
+          try {
+            _origSetItem(payload.new.key, JSON.stringify(payload.new.value));
+          } finally {
+            _dbLoadingFlag = false;
+          }
+        }
+        // Reload app state
+        if (window._reloadAppData) window._reloadAppData();
+      }
+    )
+    .subscribe((status) => {
+      console.log('[MC] Realtime status:', status);
+      const dot = document.getElementById('realtime-dot');
+      if (dot) {
+        if (status === 'SUBSCRIBED') {
+          dot.style.background = '#34D399'; // green = connected
+          dot.title = 'Tiempo real activo';
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          dot.style.background = '#F87171'; // red = error
+          dot.title = 'Error de conexion';
+        } else {
+          dot.style.background = '#FCD34D'; // yellow = connecting
+          dot.title = 'Conectando...';
+        }
+      }
+    });
+}
 
 checkAuth();
 </script>
