@@ -2748,18 +2748,13 @@ function updateNavUser() {
 
 async function startWithData() {
   const loaded = await loadFromDB();
-  if (loaded && window._reloadAppData) {
-    window._reloadAppData();
-  }
+  // Siempre recargar, haya o no datos nuevos
+  if (window._reloadAppData) window._reloadAppData();
   updateNavUser();
-  // Start realtime sync
   setupRealtime();
-  // Show confirmation with data counts
-  const salesData = (() => { try { return JSON.parse(localStorage.getItem('mc_s')||'[]'); } catch(e){return [];} })();
-  const salesCount = salesData.length;
-  const prodsCount = (() => { try { return JSON.parse(localStorage.getItem('mc_p')||'[]').length; } catch(e){return 0;} })();
-  console.log('[MC] Sync complete. Ventas:', salesCount, 'Productos:', prodsCount, 'DB loaded:', loaded);
-  if (typeof toast === 'function') toast(loaded ? ('Sincronizado: ' + salesCount + ' ventas') : 'Sin conexion - datos locales');
+  const salesCount = (() => { try { return JSON.parse(localStorage.getItem('mc_s')||'[]').length; } catch(e){return 0;} })();
+  console.log('[MC] DB loaded:', loaded, '| Ventas:', salesCount);
+  if (typeof toast === 'function') toast(loaded ? (salesCount + ' ventas sincronizadas') : 'Usando datos locales');
 }
 
 // ── AUTH ──
