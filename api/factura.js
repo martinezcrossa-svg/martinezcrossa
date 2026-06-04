@@ -10,7 +10,9 @@ function soapReq(url, action, body) {
     const u = new URL(url);
     const opts = {
       hostname: u.hostname, path: u.pathname, method: 'POST',
-      secureOptions: constants.SSL_OP_LEGACY_SERVER_CONNECT,
+      rejectUnauthorized: false,
+      secureOptions: constants.SSL_OP_LEGACY_SERVER_CONNECT | constants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
+      ciphers: 'DEFAULT:@SECLEVEL=0',
       headers: {
         'Content-Type': 'text/xml; charset=UTF-8',
         'SOAPAction': action,
@@ -106,4 +108,3 @@ export default async function handler(req, res) {
     console.error('Error:', e.message);
     return res.status(500).json({ error: e.message });
   }
-}
