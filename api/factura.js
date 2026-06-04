@@ -1,4 +1,5 @@
 import https from 'https';
+import { constants } from 'crypto';
 
 function fixPem(pem) {
   return pem.replace(/\\n/g, '\n').trim();
@@ -9,6 +10,7 @@ function soapReq(url, action, body) {
     const u = new URL(url);
     const opts = {
       hostname: u.hostname, path: u.pathname, method: 'POST',
+      secureOptions: constants.SSL_OP_LEGACY_SERVER_CONNECT,
       headers: {
         'Content-Type': 'text/xml; charset=UTF-8',
         'SOAPAction': action,
