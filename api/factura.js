@@ -79,6 +79,18 @@ async function solicitarCAE(auth, cuit, f) {
   throw new Error('CAE rechazado: ' + msgs);
 }
 
+async function solicitarCAENC(auth, cuit, f) {
+  const soap = `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/"><soapenv:Body><ar:FECAESolicitar><ar:Auth><ar:Token>${auth.token}</ar:Token><ar:Sign>${auth.sign}</ar:Sign><ar:Cuit>${cuit}</ar:Cuit></ar:Auth><ar:FeCAEReq><ar:FeCabReq><ar:CantReg>1</ar:CantReg><ar:PtoVta>${f.ptoVta}</ar:PtoVta><ar:CbteTipo>${f.tipo}</ar:CbteTipo></ar:FeCabReq><ar:FeDetReq><ar:FECAEDetRequest><ar:Concepto>1</ar:Concepto><ar:DocTipo>${f.docTipo}</ar:DocTipo><ar:DocNro>${f.docNro}</ar:DocNro><ar:CbteDesde>${f.nro}</ar:CbteDesde><ar:CbteHasta>${f.nro}</ar:CbteHasta><ar:CbteFch>${f.fecha}</ar:CbteFch><ar:ImpTotal>${f.total.toFixed(2)}</ar:ImpTotal><ar:ImpTotConc>0.00</ar:ImpTotConc><ar:ImpNeto>${f.neto.toFixed(2)}</ar:ImpNeto><ar:ImpOpEx>0.00</ar:ImpOpEx><ar:ImpIVA>${f.iva.toFixed(2)}</ar:ImpIVA><ar:ImpTrib>0.00</ar:ImpTrib><ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz><ar:Iva><ar:AlicIva><ar:Id>5</ar:Id><ar:BaseImp>${f.neto.toFixed(2)}</ar:BaseImp><ar:Importe>${f.iva.toFixed(2)}</ar:Importe></ar:AlicIva></ar:Iva><ar:CbtesAsoc><ar:CbteAsoc><ar:Tipo>${f.cbteAsocTipo}</ar:Tipo><ar:PtoVta>${f.ptoVta}</ar:PtoVta><ar:Nro>${f.cbteAsocNro}</ar:Nro><ar:Cuit>${cuit}</ar:Cuit><ar:CbteFch>${f.cbteAsocFecha}</ar:CbteFch></ar:CbteAsoc></ar:CbtesAsoc></ar:FECAEDetRequest></ar:FeDetReq></ar:FeCAEReq></ar:FECAESolicitar></soapenv:Body></soapenv:Envelope>`;
+  const resp = await soapReq('https://servicios1.afip.gov.ar/wsfev1/service.asmx', '"http://ar.gov.afip.dif.FEV1/FECAESolicitar"', soap);
+  const caeM = resp.match(/<CAE>([\s\S]*?)<\/CAE>/);
+  const fchM = resp.match(/<CAEFchVto>([\s\S]*?)<\/CAEFchVto>/);
+  const resM = resp.match(/<Resultado>([\s\S]*?)<\/Resultado>/);
+  const errM = resp.match(/<Msg>([\s\S]*?)<\/Msg>/g);
+  if (caeM && resM && resM[1].trim() === 'A') return { cae: caeM[1].trim(), vencimiento: fchM ? fchM[1].trim() : '' };
+  const msgs = errM ? errM.map(m => m.replace(/<\/?Msg>/g,'')).join(' | ') : resp.substring(0,400);
+  throw new Error('NC rechazada: ' + msgs);
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -96,6 +108,13 @@ export default async function handler(req, res) {
   try {
     const { accion, factura } = req.body || {};
     if (accion === 'test') return res.status(200).json({ ok: true, cuit, ptoVta, certOk: cert.includes('BEGIN CERTIFICATE'), keyOk: key.includes('BEGIN') });
+    if (accion === 'emitirNC') {
+      const auth = await getTicket(cert, key, 'wsfe');
+      const ultimoNro = await getUltimoNro(auth, cuit, ptoVta, factura.tipoComprobante);
+      const nro = ultimoNro + 1;
+      const resultado = await solicitarCAENC(auth, cuit, { ptoVta, tipo: factura.tipoComprobante, nro, fecha: factura.fecha, total: factura.total, neto: factura.neto, iva: factura.iva, docTipo: factura.docTipo || 99, docNro: factura.docNro || 0, cbteAsocTipo: factura.cbteAsocTipo, cbteAsocNro: factura.cbteAsocNro, cbteAsocFecha: factura.cbteAsocFecha });
+      return res.status(200).json({ ok: true, nroComprobante: nro, ...resultado });
+    }
     if (accion === 'emitir') {
       const auth = await getTicket(cert, key, 'wsfe');
       const ultimoNro = await getUltimoNro(auth, cuit, ptoVta, factura.tipoComprobante);
