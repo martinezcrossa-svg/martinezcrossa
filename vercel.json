@@ -1,5 +1,6 @@
 {
   "rewrites": [
-     { "source": "/", "destination": "/martinezcrossa_stock_92.html" }
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/", "destination": "/martinezcrossa_stock_92.html" }
   ]
 }
