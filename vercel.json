@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/martinezcrossa_stock_83.html" }
+  ]
+}
