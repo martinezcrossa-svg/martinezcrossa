@@ -48,8 +48,10 @@ async function getTicket(certPem, keyPem, service) {
   const cms = Buffer.from(der, 'binary').toString('base64');
   const soap = `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsaa="http://wsaa.view.sua.dvadac.desein.afip.gov"><soapenv:Header/><soapenv:Body><wsaa:loginCms><wsaa:in0>${cms}</wsaa:in0></wsaa:loginCms></soapenv:Body></soapenv:Envelope>`;
   const resp = await soapReq('https://wsaa.afip.gov.ar/ws/services/LoginCms', '"loginCms"', soap);
-  const tok = resp.match(/<token>([\s\S]*?)<\/token>/);
-  const sig = resp.match(/<sign>([\s\S]*?)<\/sign>/);
+  // Decode HTML entities in response (ARCA returns escaped XML inside loginCmsReturn)
+  const decoded = resp.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"');
+  const tok = decoded.match(/<token>([\s\S]*?)<\/token>/);
+  const sig = decoded.match(/<sign>([\s\S]*?)<\/sign>/);
   if (!tok || !sig) throw new Error('WSAA error: ' + resp.substring(0,400));
   return { token: tok[1].trim(), sign: sig[1].trim() };
 }
