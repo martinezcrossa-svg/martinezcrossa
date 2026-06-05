@@ -91,6 +91,21 @@ async function solicitarCAENC(auth, cuit, f) {
   throw new Error('NC rechazada: ' + msgs);
 }
 
+async function consultarPadron(auth, cuit) {
+  const soap = `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:a4="http://a4.soap.ws.server.puc.sr/"><soapenv:Header/><soapenv:Body><a4:getPersona><token>${auth.token}</token><sign>${auth.sign}</sign><cuitRepresentada>30718518497</cuitRepresentada><idPersona>${cuit}</idPersona></a4:getPersona></soapenv:Body></soapenv:Envelope>`;
+  const resp = await soapReq('https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA4', '"http://a4.soap.ws.server.puc.sr/PersonaServiceA4/getPersonaRequest"', soap);
+  const razonMatch = resp.match(/<razonSocial>([\s\S]*?)<\/razonSocial>/);
+  const tipoMatch = resp.match(/<descripcionTipoPersona>([\s\S]*?)<\/descripcionTipoPersona>/);
+  const ivaMatch = resp.match(/<descripcionActividad>([\s\S]*?)<\/descripcionActividad>/);
+  const estadoMatch = resp.match(/<estadoClave>([\s\S]*?)<\/estadoClave>/);
+  if (!razonMatch) throw new Error('CUIT no encontrado en el padron de ARCA');
+  return {
+    razonSocial: razonMatch[1].trim(),
+    tipoPersona: tipoMatch ? tipoMatch[1].trim() : '',
+    estadoClave: estadoMatch ? estadoMatch[1].trim() : '',
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -122,6 +137,14 @@ export default async function handler(req, res) {
       const resultado = await solicitarCAE(auth, cuit, { ptoVta, tipo: factura.tipoComprobante, nro, fecha: factura.fecha, total: factura.total, neto: factura.neto, iva: factura.iva, docTipo: factura.docTipo || 99, docNro: factura.docNro || 0 });
       return res.status(200).json({ ok: true, nroComprobante: nro, ...resultado });
     }
+    if (accion === 'padron') {
+      const cuitConsulta = req.body.cuit;
+      if (!cuitConsulta) return res.status(400).json({ error: 'CUIT requerido' });
+      const auth = await getTicket(cert, key, 'ws_sr_padron_a4');
+      const resultado = await consultarPadron(auth, cuitConsulta);
+      return res.status(200).json({ ok: true, ...resultado });
+    }
+
     return res.status(400).json({ error: 'Accion no reconocida' });
   } catch(e) {
     console.error('Error:', e.message);
