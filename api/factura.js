@@ -102,10 +102,16 @@ async function consultarPadron(cert, key, cuitRepr, cuitConsulta) {
   const tipoMatch = resp.match(/<tipoPersona>([\s\S]*?)<\/tipoPersona>/);
   if (!razonMatch && !nombreMatch) throw new Error('CUIT no encontrado en el padron de ARCA');
   const nombre = razonMatch ? razonMatch[1].trim() : ((apellidoMatch?apellidoMatch[1].trim():'') + ' ' + (nombreMatch?nombreMatch[1].trim():'')).trim();
+  // Extract fiscal address
+  const domFiscalMatch = resp.match(/<tipoDomicilio>FISCAL<\/tipoDomicilio>[\s\S]*?<direccion>(.*?)<\/direccion>[\s\S]*?<localidad>(.*?)<\/localidad>/);
+  const domDir = domFiscalMatch ? domFiscalMatch[1].trim() : '';
+  const domLoc = domFiscalMatch ? domFiscalMatch[2].trim() : '';
+  const domicilio = domDir ? (domDir + (domLoc ? ', ' + domLoc : '')) : '';
   return {
     razonSocial: nombre,
     tipoPersona: tipoMatch ? tipoMatch[1].trim() : '',
     estadoClave: estadoMatch ? estadoMatch[1].trim() : 'ACTIVO',
+    domicilio,
   };
 }
 
