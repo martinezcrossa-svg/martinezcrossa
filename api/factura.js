@@ -91,32 +91,22 @@ async function solicitarCAENC(auth, cuit, f) {
   throw new Error('NC rechazada: ' + msgs);
 }
 
-async function consultarPadron(cuit) {
-  // Usar API publica de ARCA para consulta de constancia
-  return new Promise((resolve, reject) => {
-    const url = `https://soa.afip.gob.ar/sr-padron/v2/persona/${cuit}`;
-    const req = https.request(url, { method: 'GET', headers: { 'Accept': 'application/json' } }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.errorUnico) throw new Error(json.errorUnico);
-          const p = json.data || json;
-          resolve({
-            razonSocial: p.razonSocial || p.apellido + ' ' + p.nombre || 'Sin datos',
-            tipoPersona: p.tipoPersona || '',
-            estadoClave: p.estadoClave || 'ACTIVO',
-          });
-        } catch(e) {
-          reject(new Error('CUIT no encontrado en ARCA'));
-        }
-      });
-    });
-    req.on('error', reject);
-    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Timeout')); });
-    req.end();
-  });
+async function consultarPadron(cert, key, cuitRepr, cuitConsulta) {
+  const auth = await getTicket(cert, key, 'ws_sr_padron_a13');
+  const soap = `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:a13="http://a13.soap.ws.server.puc.sr/"><soapenv:Header/><soapenv:Body><a13:getPersona><token>${auth.token}</token><sign>${auth.sign}</sign><cuitRepresentada>${cuitRepr}</cuitRepresentada><idPersona>${cuitConsulta}</idPersona></a13:getPersona></soapenv:Body></soapenv:Envelope>`;
+  const resp = await soapReq('https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA13', '"http://a13.soap.ws.server.puc.sr/PersonaServiceA13/getPersonaRequest"', soap);
+  const razonMatch = resp.match(/<razonSocial>([\s\S]*?)<\/razonSocial>/);
+  const nombreMatch = resp.match(/<nombre>([\s\S]*?)<\/nombre>/);
+  const apellidoMatch = resp.match(/<apellido>([\s\S]*?)<\/apellido>/);
+  const estadoMatch = resp.match(/<estadoClave>([\s\S]*?)<\/estadoClave>/);
+  const tipoMatch = resp.match(/<tipoPersona>([\s\S]*?)<\/tipoPersona>/);
+  if (!razonMatch && !nombreMatch) throw new Error('CUIT no encontrado en el padron de ARCA');
+  const nombre = razonMatch ? razonMatch[1].trim() : ((apellidoMatch?apellidoMatch[1].trim():'') + ' ' + (nombreMatch?nombreMatch[1].trim():'')).trim();
+  return {
+    razonSocial: nombre,
+    tipoPersona: tipoMatch ? tipoMatch[1].trim() : '',
+    estadoClave: estadoMatch ? estadoMatch[1].trim() : 'ACTIVO',
+  };
 }
 
 export default async function handler(req, res) {
@@ -153,7 +143,7 @@ export default async function handler(req, res) {
     if (accion === 'padron') {
       const cuitConsulta = String(req.body.cuit || '').replace(/[^0-9]/g, '');
       if (!cuitConsulta || cuitConsulta.length < 10) return res.status(400).json({ error: 'CUIT invalido' });
-      const resultado = await consultarPadron(cuitConsulta);
+      const resultado = await consultarPadron(cert, key, cuit, cuitConsulta);
       return res.status(200).json({ ok: true, ...resultado });
     }
 
